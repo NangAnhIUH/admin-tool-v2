@@ -1,0 +1,27 @@
+# Python system files
+__pycache__/
+*.pyc
+
+# Data & Output Folders (Sensitive Data - DO NOT COMMIT)
+00_master_data/
+01_function_BK/
+KETQUA/
+generated_emails/
+PDF_INPUT/
+OUTPUT/
+Invoice_fix/
+
+# File types that might contain data
+*.xlsx
+*.csv
+*.pdf
+*.zip
+*.eml
+*.xml
+
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# Config (Optional: Remove # if you want to ignore config.json too)
+# config.json
+handle_data.ipynb
