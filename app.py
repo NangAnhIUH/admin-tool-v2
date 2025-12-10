@@ -1087,14 +1087,13 @@ with st.sidebar:
 if not files_ok:
     st.info("👋 Vui lòng tải lên đầy đủ dữ liệu để bắt đầu.")
 else:
-    tab_settings, tab_process, tab_filter, tab_pdf, tab_dashboard, tab_email, tab_draft = st.tabs([
+    tab_settings, tab_process, tab_filter, tab_pdf, tab_dashboard, tab_email = st.tabs([
         "⚙️ Cấu Hình",
         "⚙️ Xử Lý Dữ Liệu", 
         "🔎 Tra Cứu & Lọc", 
         "📂 Phân Phối & Đóng Gói",
         "📊 Dashboard",
-        "✉️ Email Tool",
-        "📧 Gửi Email (Draft)"
+        "✉️ Email Tool"
     ])
     
     # --- TAB 1: SETTINGS ---
@@ -2316,189 +2315,147 @@ else:
                                 st.warning(f"Không tìm thấy file PDF nào trong thư mục: '{pdf_src_dir}'. Vui lòng kiểm tra lại đường dẫn ở Tab 'Phân Phối PDF'.")        
 
     # --- TAB 7: OPEN EMAIL DRAFT ---
-    # --- TAB 7: KIỂM TRA EMAIL DRAFT (LOCAL VIEW ONLY) ---
+    # --- TAB 7: QUẢN LÝ FILE DRAFT (VIEWER) ---
     with tab_draft:
-        st.header("📧 Kiểm Tra & Mở Email Draft (Local Only)")
+        st.header("📂 Xem & Tải Lẻ File Draft (.eml)")
         st.markdown("""
-        **Lưu ý:** Tab này chỉ hoạt động khi chạy trên máy tính cá nhân (Localhost) để kiểm tra kết quả trong thư mục đầu ra cũ. 
-        Nếu bạn đang dùng quy trình "Phân Phối & Đóng Gói" (Tab 5), file Email Draft đã có sẵn trong file Zip tải về.
+        Chức năng này giúp bạn **xem lại** và **tải lẻ** từng file Email Draft từ file kết quả (ZIP) mà bạn đã tạo ở Tab "Phân Phối & Đóng Gói".
+        
+        **Cách sử dụng:**
+        1. Tải file ZIP kết quả (ví dụ: `KETQUA_GRAB_10_2025.zip`) từ Tab trước.
+        2. Upload file ZIP đó vào đây.
+        3. Chọn nhóm cần xem và tải file `.eml` riêng lẻ.
         """)
         
         st.markdown("---")
         
-        # Folder Selection Logic
-        c1, c2 = st.columns([3, 1])
-        
-        # Init paths
-        if 'dst_dir_draft' not in st.session_state: 
-             # Try to pick up from Tab 5 if it was set manually there, else default
-             st.session_state['dst_dir_draft'] = st.session_state.get('dst_dir', "./01_function_BK/Invoices_by_Function/")
-
-        def update_draft_path():
-            st.session_state['dst_dir_draft'] = st.session_state.input_draft_path
-
-        with c1:
-             dst_dir_draft_input = st.text_input(
-                 "Thư mục chứa hồ sơ (Đã phân phối):", 
-                 value=st.session_state['dst_dir_draft'],
-                 key="input_draft_path",
-                 on_change=update_draft_path
-             )
-        
-        # Ensure variable is sync
-        dst_dir_draft = st.session_state['dst_dir_draft']
-        
-        with c2:
-             if st.button("📂 Chọn Thư Mục", key="btn_choose_draft_folder"):
-                 import tkinter as tk
-                 from tkinter import filedialog
-                 try:
-                     root = tk.Tk()
-                     root.withdraw()
-                     root.wm_attributes('-topmost', 1)
-                     selected = filedialog.askdirectory(master=root)
-                     root.destroy()
-                     if selected:
-                         st.session_state['dst_dir_draft'] = selected
-                         st.session_state['input_draft_path'] = selected
-                         st.rerun()
-                 except: pass
-
-        # --- PREVIEW SECTION ---
-        st.markdown("### 👁️ Danh Sách Nhóm & Mở Draft")
-        
-        if st.button("🔍 Quét Thư Mục & Tải Lại"):
-             st.rerun()
-
-        if os.path.exists(dst_dir_draft):
+        # 1. Upload Result Zip
+        st.caption("ℹ️ Nếu file ZIP > 200MB, hãy đảm bảo bạn đã cấu hình `.streamlit/config.toml` hoặc giải nén và nén lại từng phần nhỏ.")
+        uploaded_result_zip = st.file_uploader("📤 Upload File ZIP Kết Quả (KETQUA_...zip):", type=['zip'], key="upload_result_zip")
+        if uploaded_result_zip:
+            # Create temp dir for viewing
+            if 'viewer_temp_dir' not in st.session_state:
+                 st.session_state['viewer_temp_dir'] = tempfile.mkdtemp()
+            
+            viewer_dir = st.session_state['viewer_temp_dir']
+            
+            # Extract
             try:
-                found_groups = [d for d in os.listdir(dst_dir_draft) if os.path.isdir(os.path.join(dst_dir_draft, d))]
+                # Clear old files in temp if any
+                for f in os.listdir(viewer_dir):
+                    p = os.path.join(viewer_dir, f)
+                    if os.path.isfile(p): os.remove(p)
+                    elif os.path.isdir(p): shutil.rmtree(p)
+
+                with zipfile.ZipFile(uploaded_result_zip, 'r') as z:
+                    z.extractall(viewer_dir)
                 
-                if not found_groups:
-                     st.warning("Không tìm thấy thư mục con nào trong đường dẫn này.")
+                # List groups (folders in root or inside a subfolder if zipped with folder)
+                items = os.listdir(viewer_dir)
+                root_items = [os.path.join(viewer_dir, i) for i in items if os.path.isdir(os.path.join(viewer_dir, i))]
+                
+                # Heuristic: If only 1 folder, assume it's the root container
+                current_view_root = viewer_dir
+                if len(root_items) == 1 and len(items) == 1:
+                     current_view_root = root_items[0]
+                
+                # List Groups
+                found_groups = [d for d in os.listdir(current_view_root) if os.path.isdir(os.path.join(current_view_root, d))]
+                
+                if found_groups:
+                    st.success(f"✅ Đã tải: {len(found_groups)} nhóm chức năng.")
+                    
+                    # Group Selector
+                    col_sel, col_info = st.columns([1, 2])
+                    with col_sel:
+                        selected_grp_view = st.selectbox("Chọn nhóm:", sorted(found_groups))
+                    
+                    if selected_grp_view:
+                        g_path_view = os.path.join(current_view_root, selected_grp_view)
+                        g_files_view = os.listdir(g_path_view)
+                        
+                        # Find Files
+                        html_f = next((f for f in g_files_view if f.endswith('.html')), None)
+                        excel_f = next((f for f in g_files_view if f.endswith('.xlsx') and f.startswith('BK_GRAB_')), None)
+                        pdf_cnt = sum(1 for f in g_files_view if f.lower().endswith('.pdf'))
+                        
+                        # Find Email in HTML filename
+                        email_dest = "N/A"
+                        if html_f:
+                             if "email_" in html_f:
+                                 email_dest = html_f.replace(f"email_{selected_grp_view}_", "").replace(".html", "")
+                        
+                        with col_info:
+                            st.markdown(f"**Thông tin nhóm: {selected_grp_view}**")
+                            st.text(f"📧 Email: {email_dest}")
+                            st.text(f"📊 Excel: {excel_f}")
+                            st.text(f"📑 PDF Invoice: {pdf_cnt} files")
+                        
+                        st.markdown("### 🛠️ Công Cụ")
+                        # Action: Generate Single Draft Download
+                        if st.button(f"⬇️ Tạo & Tải Draft Riêng ({selected_grp_view})", type="primary"):
+                             if html_f and excel_f:
+                                 try:
+                                     # Read content
+                                     with open(os.path.join(g_path_view, html_f), 'r', encoding='utf-8') as f:
+                                         body_html = f.read()
+                                     
+                                     # Create MIME
+                                     msg = MIMEMultipart('mixed')
+                                     msg['Subject'] = f"Grab Invoice - {selected_grp_view}"
+                                     msg['To'] = email_dest if "@" in email_dest else ""
+                                     msg['X-Unsent'] = '1'
+                                     
+                                     # Body
+                                     msg_alt = MIMEMultipart('alternative')
+                                     msg_alt.attach(MIMEText("Please view in HTML.", 'plain', 'utf-8'))
+                                     msg_alt.attach(MIMEText(body_html, 'html', 'utf-8'))
+                                     msg.attach(msg_alt)
+                                     
+                                     # Attach Excel
+                                     with open(os.path.join(g_path_view, excel_f), 'rb') as f:
+                                         att_excel = MIMEApplication(f.read(), Name=excel_f)
+                                     att_excel['Content-Disposition'] = f'attachment; filename="{excel_f}"'
+                                     msg.attach(att_excel)
+                                     
+                                     # Zip PDF if any
+                                     pdf_list = []
+                                     for root, dirs, files in os.walk(g_path_view):
+                                         for file in files:
+                                             if file.lower().endswith('.pdf'):
+                                                 pdf_list.append(os.path.join(root, file))
+
+                                     if pdf_list:
+                                         b_io = io.BytesIO()
+                                         with zipfile.ZipFile(b_io, 'w', zipfile.ZIP_DEFLATED) as z:
+                                             for p in pdf_list:
+                                                 rel_p = os.path.relpath(p, g_path_view)
+                                                 z.write(p, arcname=os.path.basename(p))
+                                         b_io.seek(0)
+                                         att_zip = MIMEApplication(b_io.read(), Name=f"Invoices_{selected_grp_view}.zip")
+                                         att_zip['Content-Disposition'] = f'attachment; filename="Invoices_{selected_grp_view}.zip"'
+                                         msg.attach(att_zip)
+                                     
+                                     # Download Button
+                                     st.download_button(
+                                         label="📥 Nhấn để tải về máy (.eml)",
+                                         data=msg.as_bytes(),
+                                         file_name=f"Draft_{selected_grp_view}.eml",
+                                         mime="message/rfc822"
+                                     )
+                                     st.success("Đã tạo file xong!")
+                                     
+                                 except Exception as e:
+                                     st.error(f"Lỗi: {e}")
+                             else:
+                                 st.warning("Thiếu file HTML hoặc Excel trong nhóm này.")
+
                 else:
-                    st.success(f"Tìm thấy {len(found_groups)} nhóm.")
+                    st.warning("Không tìm thấy thư mục nhóm nào trong file Zip này. Vui lòng kiểm tra lại cấu trúc file.")
                     
-                    selected_preview_group = st.selectbox("Chọn nhóm để xử lý:", found_groups)
-                    
-                    if selected_preview_group:
-                        g_path = os.path.join(dst_dir_draft, selected_preview_group)
-                        g_files = os.listdir(g_path)
-                        
-                        # Find key files
-                        html_f_name = None
-                        # Try exact group match first
-                        if f"{selected_preview_group}.html" in g_files:
-                             html_f_name = f"{selected_preview_group}.html"
-                        # Try prefix match (old logic)
-                        elif any(f.startswith(f"email_{selected_preview_group}") and f.endswith(".html") for f in g_files):
-                             html_f_name = next(f for f in g_files if f.startswith(f"email_{selected_preview_group}") and f.endswith(".html"))
-                        # Fallback any html
-                        elif any(f.endswith(".html") for f in g_files):
-                             html_f_name = next(f for f in g_files if f.endswith(".html"))
-
-                        html_exists = html_f_name is not None
-                        
-                        excel_f = next((f for f in g_files if f.endswith('.xlsx') and f.startswith('BK_GRAB_')), None)
-                        
-                        # Count PDF recursively
-                        pdf_count = 0
-                        for root, dirs, files in os.walk(g_path):
-                            for f in files:
-                                if f.lower().endswith('.pdf'): pdf_count += 1
-                        
-                        # Get Email info
-                        current_email = "Không tìm thấy"
-                        if html_f_name:
-                            if "email_" in html_f_name:
-                                 current_email = html_f_name.replace(f"email_{selected_preview_group}_", "").replace(".html", "")
-                            else:
-                                 current_email = "(Xem trong file HTML)"
-
-                        # Display Info
-                        st.info(f"**Email:** {current_email} | **Excel:** {excel_f if excel_f else '❌'} | **PDF:** {pdf_count}")
-                        
-                        st.markdown("---")
-                        
-                        # OPEN DRAFT BUTTON
-                        col_btn1, col_btn2 = st.columns(2)
-                        
-                        with col_btn1:
-                            if st.button("🚀 Tạo & Mở File Draft (Local)"):
-                                if not html_exists or not excel_f:
-                                    st.error("Thiếu file HTML hoặc Excel để tạo Draft.")
-                                else:
-                                    # Standalone Single-File Draft Creation Logic
-                                    try:
-                                        # 1. Read HTML
-                                        with open(os.path.join(g_path, html_f_name), 'r', encoding='utf-8') as f:
-                                            email_body = f.read()
-
-                                        msg = MIMEMultipart('mixed')
-                                        msg['Subject'] = f"Bảng Kê Grab Tháng - Nhóm {selected_preview_group}"
-                                        
-                                        if "@" in current_email: msg['To'] = current_email
-                                        else: msg['To'] = ""
-                                        msg['X-Unsent'] = '1'
-
-                                        # Body
-                                        msg_body = MIMEMultipart('alternative')
-                                        msg_body.attach(MIMEText("Vui lòng xem ở chế độ HTML.", 'plain', 'utf-8'))
-                                        msg_body.attach(MIMEText(email_body, 'html', 'utf-8'))
-                                        msg.attach(msg_body)
-
-                                        # Excel
-                                        excel_path = os.path.join(g_path, excel_f)
-                                        with open(excel_path, "rb") as f:
-                                            part = MIMEApplication(f.read(), Name=excel_f)
-                                        part['Content-Disposition'] = f'attachment; filename="{excel_f}"'
-                                        msg.attach(part)
-
-                                        # Zip PDFs
-                                        zip_filename = f"Invoices_{selected_preview_group}.zip"
-                                        zip_path = os.path.join(g_path, zip_filename)
-                                        
-                                        if os.path.exists(zip_path): 
-                                            try: os.remove(zip_path) 
-                                            except: pass
-
-                                        pdf_files_to_zip = []
-                                        for root, dirs, files_in_dir in os.walk(g_path):
-                                            for file in files_in_dir:
-                                                if file.lower().endswith('.pdf'):
-                                                    pdf_files_to_zip.append(os.path.join(root, file))
-                                        
-                                        if pdf_files_to_zip:
-                                            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                                                for pdf_p in pdf_files_to_zip:
-                                                    rel_path = os.path.relpath(pdf_p, g_path)
-                                                    zipf.write(pdf_p, arcname=rel_path)
-                                            
-                                            with open(zip_path, 'rb') as f:
-                                                part = MIMEApplication(f.read(), Name=zip_filename)
-                                            part['Content-Disposition'] = f'attachment; filename="{zip_filename}"'
-                                            msg.attach(part)
-
-                                        # Save EML
-                                        eml_name = f"Draft_{selected_preview_group}.eml"
-                                        eml_path = os.path.join(g_path, eml_name)
-                                        with open(eml_path, 'wb') as f:
-                                            f.write(msg.as_bytes())
-
-                                        # Open Folder
-                                        subprocess.Popen(f'explorer /select,"{os.path.abspath(eml_path)}"')
-                                        st.success(f"✅ Đã tạo & mở: {eml_name}")
-
-                                    except Exception as e:
-                                        st.error(f"Lỗi: {e}")
-
-                        with col_btn2:
-                             if st.button("📂 Mở Thư Mục Nhóm"):
-                                 try: os.startfile(g_path)
-                                 except: st.error("Không thể mở thư mục.")
-
             except Exception as e:
-                st.error(f"Lỗi đọc thư mục: {e}")
+                st.error(f"Lỗi đọc file Zip: {e}")
         else:
-            st.error(f"Thư mục không tồn tại: {dst_dir_draft}")
+            st.info("Vui lòng upload file ZIP kết quả để xem.")
+
 
