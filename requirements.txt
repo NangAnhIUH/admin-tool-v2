@@ -2,5 +2,5 @@ streamlit
 pandas
 openpyxl
 xlsxwriter
+streamlit-quill
 plotly
-pydeck
