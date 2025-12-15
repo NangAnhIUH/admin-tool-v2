@@ -8,7 +8,7 @@
         "SKIPROWS_GROUP_FUNCTION_APPROVAL": 1
     },
     "input_columns": {
-        "IN_COL_BK_BOOKING_ID": "booking_code_for_business_grab_com",
+        "IN_COL_BK_BOOKING_ID": "booking_code_for_business_grab_1",
         "IN_COL_BK_GROUP_NAME": "Tên nhóm (Group Name)",
         "IN_COL_BK_VERTICAL": "Dịch vụ (Vertical)",
         "IN_COL_BK_COMPANY_NAME": "Tên công ty (Company Name)",
@@ -94,5 +94,59 @@
         "COL_GROUP_FUNCTION",
         "COL_CITY",
         "COL_COMPANY_NAME"
-    ]
+    ],
+    "users": {
+        "admin1": {
+            "name": "Admin One",
+            "password": "123",
+            "email": "admin1@gmail.com",
+            "config": "config1"
+        },
+        "admin2": {
+            "name": "Admin Two",
+            "password": "123",
+            "email": "admin2@gmail.com",
+            "config": "config2"
+        },
+        "admin3": {
+            "name": "Admin Three",
+            "password": "123",
+            "email": "admin3@gmail.com",
+            "config": "config3"
+        },
+        "admin4": {
+            "name": "Admin Four",
+            "password": "123",
+            "email": "admin4@gmail.com",
+            "config": "config4"
+        },
+        "admin5": {
+            "name": "Admin Five",
+            "password": "123",
+            "email": "admin5@gmail.com",
+            "config": "config5"
+        }
+    },
+    "user_configs": {
+        "config1": {
+            "theme": "light",
+            "access_level": "full"
+        },
+        "config2": {
+            "theme": "dark",
+            "access_level": "read_only"
+        },
+        "config3": {
+            "theme": "light",
+            "access_level": "reports_only"
+        },
+        "config4": {
+            "theme": "dark",
+            "access_level": "full"
+        },
+        "config5": {
+            "theme": "light",
+            "access_level": "read_only"
+        }
+    }
 }

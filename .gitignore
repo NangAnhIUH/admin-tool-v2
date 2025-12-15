@@ -3,8 +3,8 @@ __pycache__/
 *.pyc
 
 # Data & Output Folders (Sensitive Data - DO NOT COMMIT)
-00_master_data/
-01_function_BK/
+000_master_data/
+001_function_BK/
 KETQUA/
 generated_emails/
 PDF_INPUT/

@@ -17,6 +17,67 @@ from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 from email.mime.base import MIMEBase
 from email import encoders
+from streamlit_quill import st_quill
+
+# ==========================================
+# 0. AUTHENTICATION & LOGIN
+# ==========================================
+def check_password():
+    """Returns `True` if the user had a correct password."""
+
+    def password_entered():
+        """Checks whether a password entered by the user is correct."""
+        if 'users' in st.session_state.get('config', {}):
+            users_db = st.session_state['config']['users']
+            username = st.session_state.get("username_input")
+            password = st.session_state.get("password_input")
+
+            if username in users_db and users_db[username]['password'] == password:
+                st.session_state["authenticated"] = True
+                st.session_state["current_user"] = username
+                st.session_state["user_config"] = st.session_state['config'].get('user_configs', {}).get(users_db[username]['config'], {})
+                del st.session_state["password_input"]  # Don't store password
+            else:
+                st.session_state["authenticated"] = False
+                st.error("😕 User not known or password incorrect")
+        else:
+             st.error("Config not loaded correctly.")
+
+    if "authenticated" not in st.session_state:
+        st.session_state["authenticated"] = False
+
+    if not st.session_state["authenticated"]:
+        # Load config strictly for auth check first
+        try:
+            with open('config.json', 'r', encoding='utf-8') as f:
+                st.session_state['config'] = json.load(f)
+        except:
+            st.error("Critical: config.json not found.")
+            return False
+
+        st.markdown("## 🔐 Đăng Nhập Hệ Thống")
+        st.text_input("Username", key="username_input")
+        st.text_input("Password", type="password", key="password_input", on_change=password_entered)
+        if st.button("Login"):
+            password_entered()
+        
+        return False
+    
+    return True
+
+# ==========================================
+# MAIN APP ENTRY POINT
+# ==========================================
+if __name__ == "__main__":
+    if not check_password():
+        st.stop()  # Stop execution if not authenticated
+
+    # --- LOGOUT BUTTON (Sidebar) ---
+    with st.sidebar:
+        st.write(f"Xin chào, **{st.session_state.get('config', {}).get('users', {}).get(st.session_state.get('current_user'), {}).get('name', 'User')}**!")
+        if st.button("🚪 Đăng Xuất"):
+            st.session_state["authenticated"] = False
+            st.rerun()
 
 # ==========================================
 # HELPER FUNCTIONS FOR EMAIL
@@ -249,6 +310,13 @@ def save_config(config):
 
 # Load config globally
 CONFIG = load_config()
+
+# Override with User Config if available (Multi-user support)
+if 'user_config' in st.session_state and isinstance(st.session_state['user_config'], dict):
+    # Update top-level keys (like input_columns, output_columns) if they exist in user_config
+    # Note: This is a shallow update. For deep merge, more logic is needed.
+    # But for replacing entire mapping sets, update() is sufficient.
+    CONFIG.update(st.session_state['user_config'])
 
 def get_conf(section, key, default=None):
     return CONFIG.get(section, {}).get(key, default)
@@ -659,13 +727,14 @@ def generate_output_from_df(bangKe, report_df, file_bang_ke_original):
 
     output_dir = os.path.join(temp_dir, "output")
     os.makedirs(output_dir, exist_ok=True)
-    all_functions = bangKe[COL_GROUP_FUNCTION].dropna().unique()
+    all_functions = sorted(bangKe[COL_GROUP_FUNCTION].dropna().unique())
     file_list_log = []
 
     # Files Con
-    for func in all_functions:
+    for idx, func in enumerate(all_functions, start=1):
         safe_func_name = str(func).strip().replace("/", "_").replace("\\", "_")
-        filename = f"BK_GRAB_{safe_func_name}_{month}_{year}.xlsx"
+        prefix = f"{idx:03d}"
+        filename = f"{prefix}_BK_GRAB_{safe_func_name}_{month}_{year}.xlsx"
         filepath = os.path.join(output_dir, filename)
         file_list_log.append(filename)
         
@@ -682,9 +751,9 @@ def generate_output_from_df(bangKe, report_df, file_bang_ke_original):
         writer.close()
 
     # Master File
-    master_filename = f"BK_GRAB_MASTER_{month}_{year}.xlsx"
+    master_filename = f"000_BK_GRAB_MASTER_{month}_{year}.xlsx"
     master_path = os.path.join(output_dir, master_filename)
-    file_list_log.append(f"MASTER/{master_filename}") 
+    file_list_log.append(f"MASTER/{master_filename}")  
     writer_master = pd.ExcelWriter(master_path, engine='xlsxwriter')
     
     master_ck = bangKe[bangKe[COL_PAYMENT_METHOD_INVOICE] == VAL_PAYMENT_METHOD_TRANSFER]
@@ -826,7 +895,7 @@ def distribute_all_files_logic(df_processed, df_report, source_pdf_dir, target_r
     if COL_GROUP_FUNCTION not in df_processed.columns:
         return ["❌ Không tìm thấy cột Group Function trong dữ liệu."]
     
-    all_funcs = df_processed[COL_GROUP_FUNCTION].dropna().unique()
+    all_funcs = sorted(df_processed[COL_GROUP_FUNCTION].dropna().unique())
     available_pdfs = os.listdir(source_pdf_dir)
     
     progress_bar = st.progress(0)
@@ -844,15 +913,16 @@ def distribute_all_files_logic(df_processed, df_report, source_pdf_dir, target_r
         month, year, number_of_days = 0, 0, 0
         month_year_str = "MM/YYYY"
 
-    for idx, func in enumerate(all_funcs):
+    for idx, func in enumerate(all_funcs, start=1):
         safe_func_name = str(func).strip().replace("/", "_").replace("\\", "_")
+        prefix = f"{idx:03d}"
         # Create Group Folder
         group_dir = os.path.join(target_root_dir, safe_func_name)
         os.makedirs(group_dir, exist_ok=True)
         
         # --- A. GENERATE EXCEL ---
         try:
-            excel_filename = f"BK_GRAB_{safe_func_name}_{month}_{year}.xlsx"
+            excel_filename = f"{prefix}_BK_GRAB_{safe_func_name}_{month}_{year}.xlsx"
             excel_path = os.path.join(group_dir, excel_filename)
             
             df_func = df_processed[df_processed[COL_GROUP_FUNCTION] == func]
@@ -1046,14 +1116,6 @@ st.title("🚗 Grab Admin Tool")
 # --- SIDEBAR ---
 with st.sidebar:
     # st.image("https://cdn.haitrieu.com/wp-content/uploads/2022/10/Logo-Coca-Cola.png", width=100)
-    st.title("🗂️ Menu Điều Khiển")
-    
-    with st.expander("ℹ️ Hướng dẫn nhanh", expanded=False):
-        st.markdown("""
-        1. **Tải dữ liệu**: Upload đủ 5 file yêu cầu bên dưới.
-        2. **Xử lý**: Qua tab "Xử Lý Dữ Liệu" bấm nút chạy.
-        3. **Kết quả**: Tải file Zip hoặc xem Dashboard phân tích.
-        """)
     
     st.markdown("---")
     st.markdown("### 1️⃣ Dữ Liệu Grab (Input)")
@@ -1971,348 +2033,306 @@ else:
         st.header("✉️ Công Cụ Tạo Email & Báo Cáo Gửi Khách Hàng")
         st.markdown("Tạo email thông báo thanh toán Grab tự động dựa trên template và dữ liệu đã xử lý.")
         
-        # New Layout: Charts on LEFT, Editor/Actions on RIGHT
-        col_email_left, col_email_right = st.columns([1.2, 1])
+        # New Layout: Split view for editor and preview
+        col_editor, col_preview = st.columns([1, 1], gap="large")
         
-        # --- LEFT COLUMN: CHARTS & STATS ---
-        with col_email_left:
-            st.subheader("📊 Thống Kê & Trạng Thái")
+        # Load default template content
+        default_template = ""
+        try:
+            if 'email_content_buffer' not in st.session_state:
+                with open("templates/grab_invoice_email.html", "r", encoding="utf-8") as f:
+                    st.session_state['email_content_buffer'] = f.read()
+        except:
+            st.session_state['email_content_buffer'] = "<!-- Template not found or could not be loaded. -->\n<html><body><p>Error loading template.</p></body></html>"
+
+        # --- LEFT COLUMN: EDITOR ---
+        with col_editor:
+            st.subheader("📝 Chỉnh Sửa Template HTML")
             
+            # Helper list of variables for user reference
+            st.markdown("##### 📋 Các biến có sẵn (Copy & Paste)")
+            
+            var_data = [
+                {"Biến": "{recipient_name}", "Mô tả": "Tên người nhận"},
+                {"Biến": "{sender_name}", "Mô tả": "Tên người gửi"},
+                {"Biến": "{month_year}", "Mô tả": "Tháng/Năm báo cáo"},
+                {"Biến": "{invoice_count}", "Mô tả": "Số lượng hóa đơn"},
+                {"Biến": "{vendor_code}", "Mô tả": "Mã Vendor"},
+                {"Biến": "{po_number}", "Mô tả": "Số PO"},
+                {"Biến": "{invoice_date}", "Mô tả": "Ngày hóa đơn"},
+                {"Biến": "{cc_list}", "Mô tả": "Danh sách CC"}
+            ]
+            st.table(pd.DataFrame(var_data))
+
+            # --- QUILL EDITOR ---
+            # Using streamlit-quill for WYSIWYG editing
+            email_template_content = st_quill(
+                value=st.session_state['email_content_buffer'],
+                placeholder="Nhập nội dung email tại đây...",
+                html=True,
+                key="quill_email_editor",
+                toolbar=[
+                    ['bold', 'italic', 'underline', 'strike'],        # toggled buttons
+                    ['blockquote', 'code-block'],
+                    [{'header': 1}, {'header': 2}],               # custom button values
+                    [{'list': 'ordered'}, {'list': 'bullet'}],
+                    [{'script': 'sub'}, {'script': 'super'}],      # superscript/subscript
+                    [{'indent': '-1'}, {'indent': '+1'}],          # outdent/indent
+                    [{'direction': 'rtl'}],                         # text direction
+                    [{'size': ['small', False, 'large', 'huge']}],  # custom dropdown
+                    [{'header': [1, 2, 3, 4, 5, 6, False]}],
+                    [{'color': []}, {'background': []}],          # dropdown with defaults from theme
+                    [{'font': []}],
+                    [{'align': []}],
+                    ['clean'],                                         # remove formatting button
+                    ['link', 'image']
+                ]
+            )
+            
+            # Update buffer when editor changes
+            if email_template_content:
+                st.session_state['email_content_buffer'] = email_template_content
+            
+            if st.button("💾 Lưu Template", type="primary"):
+                try:
+                    os.makedirs("templates", exist_ok=True)
+                    with open("templates/grab_invoice_email.html", "w", encoding="utf-8") as f:
+                        f.write(email_template_content)
+                    st.success("✅ Đã lưu template thành công!")
+                except Exception as e:
+                    st.error(f"Lỗi khi lưu template: {e}")
+
+        # --- RIGHT COLUMN: REAL-TIME PREVIEW ---
+        with col_preview:
+            st.subheader("👀 Xem Trước (Real-time)")
+            # Render the HTML directly
+            components.html(email_template_content, height=700, scrolling=True)
+
+        st.markdown("---") # Separator below the split view
+        
+        # Remainder of the email tab logic (moved below the split view)
+        st.subheader("🚀 Tạo & Tải Email")
+        
+        if 'df_processed' in st.session_state and up_function:
+            # Group Selection for Preview (now for generating all emails or specific drafts)
+            df_proc_prev = st.session_state['df_processed']
+            all_groups_prev = sorted(df_proc_prev[COL_GROUP_FUNCTION].dropna().unique())
+            
+            selected_grp_gen = st.selectbox("Chọn nhóm để tạo/xem thông tin email:", all_groups_prev, key="email_gen_grp_select")
+            
+            if selected_grp_gen:
+                # Display info for the selected group for generation
+                try:
+                    g_data = st.session_state['df_processed'][st.session_state['df_processed'][COL_GROUP_FUNCTION] == selected_grp_gen]
+                    
+                    email_map_prev = get_email_mapping_from_upload(up_function)
+                    assoc_f = ""
+                    if COL_GROUP_FUNCTION in g_data.columns:
+                         v_funcs = g_data[COL_GROUP_FUNCTION].dropna()
+                         if not v_funcs.empty: assoc_f = v_funcs.iloc[0]
+                    
+                    l_key = normalize_func_name(str(assoc_f))
+                    e_info = email_map_prev.get(l_key, {})
+                    
+                    if not e_info.get('to'):
+                        l_key_d = normalize_func_name(str(selected_grp_gen))
+                        e_info_d = email_map_prev.get(l_key_d, {})
+                        if e_info_d.get('to'): e_info = e_info_d
+                    
+                    e_to = e_info.get('to') or "user@example.com"
+                    e_cc = e_info.get('cc', "")
+                    r_name = extract_name_from_email(e_to)
+                    
+                    inv_c = 0
+                    if COL_BOOKING_CODE in g_data.columns:
+                        inv_raw = g_data[COL_BOOKING_CODE].dropna().astype(str).str.strip()
+                        inv_c = inv_raw[inv_raw != ''].nunique()
+                    
+                    try:
+                        ds = pd.to_datetime(g_data[COL_TIME], errors='coerce')
+                        my = f"{int(ds.dt.month.max())}/{int(ds.dt.year.max())}"
+                    except: my = "MM/YYYY"
+
+                    st.info(f"Thông tin cho nhóm **{selected_grp_gen}**:")
+                    st.markdown(f"- **Người nhận chính:** `{e_to}`")
+                    st.markdown(f"- **CC:** `{e_cc if e_cc else 'Không có'}`")
+                    st.markdown(f"- **Tên người nhận (từ email):** `{r_name}`")
+                    st.markdown(f"- **Tháng/Năm:** `{my}`")
+                    st.markdown(f"- **Số hóa đơn:** `{inv_c}`")
+                    
+                except Exception as e:
+                    st.error(f"Lỗi hiển thị thông tin nhóm: {e}")
+            
+            # ACTION BUTTONS
+            if st.button("⚡ Tạo Tất Cả Email (HTML files)", type="primary", use_container_width=True):
+                with st.spinner("Đang tạo các file email HTML..."):
+                    with tempfile.TemporaryDirectory() as temp_email_dir:
+                        email_map_gen = get_email_mapping_from_upload(up_function)
+                        
+                        cnt = 0
+                        for grp in all_groups_prev:
+                            try:
+                                g_df = df_proc_prev[df_proc_prev[COL_GROUP_FUNCTION] == grp]
+                                
+                                assoc_f = ""
+                                if COL_GROUP_FUNCTION in g_df.columns:
+                                     v_funcs = g_df[COL_GROUP_FUNCTION].dropna()
+                                     if not v_funcs.empty: assoc_f = v_funcs.iloc[0]
+
+                                l_key = normalize_func_name(str(assoc_f))
+                                e_info = email_map_gen.get(l_key, {})
+                                
+                                if not e_info.get('to'):
+                                    l_key_d = normalize_func_name(str(grp))
+                                    e_info_d = email_map_gen.get(l_key_d, {})
+                                    if e_info_d.get('to'): e_info = e_info_d
+                                
+                                e_to = e_info.get('to') or "user@example.com"
+                                e_cc = e_info.get('cc', "")
+                                r_name = extract_name_from_email(e_to)
+                                
+                                inv_c = 0
+                                if COL_BOOKING_CODE in g_df.columns:
+                                    inv_raw = g_df[COL_BOOKING_CODE].dropna().astype(str).str.strip()
+                                    inv_c = inv_raw[inv_raw != ''].nunique()
+                                
+                                if inv_c == 0: continue
+                                
+                                try:
+                                    ds = pd.to_datetime(g_df[COL_TIME], errors='coerce')
+                                    my = f"{int(ds.dt.month.max())}/{int(ds.dt.year.max())}"
+                                except: my = ""
+                                
+                                final_h = email_template_content # Use content from the editor
+                                rep_map = {
+                                    'recipient_name': r_name,
+                                    'sender_name': 'Duyên',
+                                    'month_year': my,
+                                    'invoice_count': inv_c,
+                                    'vendor_code': '94001511',
+                                    'po_number': 'PO4502120145',
+                                    'invoice_date': '07-08-2023',
+                                    'cc_list': e_cc
+                                }
+                                for k, v in rep_map.items():
+                                    final_h = final_h.replace(f"{{{k}}}", str(v))
+                                    
+                                safe_n = str(grp).replace('/', '_')
+                                safe_e = e_to.replace('/', '_').replace('\\', '_')
+                                out_name = f"email_{safe_n}_{safe_e}.html"
+                                
+                                with open(os.path.join(temp_email_dir, out_name), "w", encoding="utf-8") as f:
+                                    f.write(final_h)
+                                cnt += 1
+                            except Exception as e:
+                                st.warning(f"Bỏ qua tạo email cho nhóm {grp} do lỗi: {e}")
+                        
+                        if cnt > 0:
+                            zip_buf = io.BytesIO()
+                            with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+                                for r, d, f in os.walk(temp_email_dir):
+                                    for file in f:
+                                        zf.write(os.path.join(r, file), file)
+                            zip_buf.seek(0)
+                            st.session_state['email_zip'] = zip_buf
+                            st.success(f"Đã tạo {cnt} file email HTML!")
+                        else:
+                            st.warning("Không tạo được file email nào. Vui lòng kiểm tra dữ liệu và cấu hình.")
+
+            if 'email_zip' in st.session_state:
+                st.download_button(
+                    label="⬇️ Tải Xuống Tất Cả Email (Zip)",
+                    data=st.session_state['email_zip'],
+                    file_name="All_Emails_HTML.zip",
+                    mime="application/zip",
+                    use_container_width=True
+                )
+        
+        # --- SUMMARY & CHART (ORIGINAL SECTION, now below main actions) ---
+        st.markdown("---")
+        with st.expander("📊 Bảng Đối Chiếu Số Liệu & Trạng Thái PDF (Theo Group Function)", expanded=True):
             if 'df_processed' in st.session_state:
                 df_proc = st.session_state['df_processed']
                 
-                if COL_GROUP_FUNCTION in df_proc.columns:
-                    # Prepare Summary Data
+                if COL_GROUP_FUNCTION not in df_proc.columns:
+                    st.error(f"Không tìm thấy cột '{COL_GROUP_FUNCTION}' trong dữ liệu. Vui lòng kiểm tra cấu hình.")
+                else:
                     all_funcs = sorted(df_proc[COL_GROUP_FUNCTION].dropna().unique())
+                    
+                    pdf_src_dir = st.session_state.get('src_dir', "./000_master_data/PDF/")
+                    
+                    pdf_files = []
+                    if os.path.exists(pdf_src_dir):
+                        try:
+                            pdf_files = [f for f in os.listdir(pdf_src_dir) if f.lower().endswith('.pdf')]
+                        except: pass
+                    
                     summary_data = []
                     
                     for func in all_funcs:
-                        df_f = df_proc[df_proc[COL_GROUP_FUNCTION] == func]
+                        g_data = df_proc[df_proc[COL_GROUP_FUNCTION] == func]
                         
-                        # Count Invoices
-                        inv_cnt = 0
-                        if COL_BOOKING_CODE in df_f.columns:
-                             inv_raw = df_f[COL_BOOKING_CODE].dropna().astype(str).str.strip()
-                             inv_cnt = inv_raw[inv_raw != ''].nunique()
+                        count_excel = 0
+                        inv_list = []
+                        if COL_BOOKING_CODE in g_data.columns:
+                            inv_list = g_data[COL_BOOKING_CODE].dropna().astype(str).str.strip().unique()
+                            inv_list = [i for i in inv_list if i != '']
+                            count_excel = len(inv_list)
                         
-                        # Total Amount
-                        total_amt = df_f[COL_TOTAL_AMOUNT].sum() if COL_TOTAL_AMOUNT in df_f.columns else 0
+                        count_pdf = 0
+                        missing_pdf_list = []
+                        
+                        if pdf_files:
+                            match_col = COL_INVOICE_NUM if COL_INVOICE_NUM in g_data.columns else COL_BOOKING_CODE
+                            
+                            check_items = g_data[match_col].dropna().astype(str).str.strip().unique()
+                            check_items = [i for i in check_items if i != '']
+                            
+                            for item in check_items:
+                                if any(item in f for f in pdf_files):
+                                    count_pdf += 1
+                                else:
+                                    missing_pdf_list.append(item)
+                        
+                        status = "✅ Đủ" if count_pdf >= count_excel and count_excel > 0 else ("⚠️ Thiếu" if count_pdf > 0 else "❌ Không tìm thấy")
+                        if not pdf_files: status = "⚪ Chưa có PDF"
                         
                         summary_data.append({
-                            'Group Function': func,
-                            'Số Hóa Đơn': inv_cnt,
-                            'Tổng Tiền': total_amt
+                            COL_GROUP_FUNCTION: func,
+                            "Số HĐ (Excel)": count_excel,
+                            "PDF Tìm Thấy": count_pdf if pdf_files else 0,
+                            "Trạng Thái": status
                         })
                     
                     df_summary = pd.DataFrame(summary_data)
                     
-                    # 1. Bar Chart: Cost by Function
-                    fig_cost = px.bar(
-                        df_summary.sort_values('Tổng Tiền', ascending=True),
-                        x='Tổng Tiền', y='Group Function',
-                        orientation='h',
-                        text_auto='.2s',
-                        title="Top Chi Phí theo Group Function",
-                        color='Tổng Tiền',
-                        color_continuous_scale='Viridis'
-                    )
-                    st.plotly_chart(fig_cost, use_container_width=True)
-                    
-                    # 2. Table Summary
-                    st.dataframe(
-                        df_summary.style.format({'Tổng Tiền': '{:,.0f}'}), 
-                        use_container_width=True,
-                        height=400
-                    )
-                else:
-                    st.warning(f"Chưa có cột {COL_GROUP_FUNCTION} để vẽ biểu đồ.")
-            else:
-                st.info("Vui lòng xử lý dữ liệu trước.")
-
-        # --- RIGHT COLUMN: EDITOR & DOWNLOAD ---
-        with col_email_right:
-            st.subheader("📝 Template & Tải Về")
-            
-            # Template Editor
-            with st.expander("Chỉnh sửa Template HTML", expanded=False):
-                # Load default template content
-                default_template = ""
-                try:
-                    with open("templates/grab_invoice_email.html", "r", encoding="utf-8") as f:
-                        default_template = f.read()
-                except:
-                    default_template = "Template not found."
-                    
-                # Template Editor
-                email_template_content = st.text_area("HTML Template:", value=default_template, height=300)
-                
-                if st.button("💾 Lưu Template"):
-                    try:
-                        os.makedirs("templates", exist_ok=True)
-                        with open("templates/grab_invoice_email.html", "w", encoding="utf-8") as f:
-                            f.write(email_template_content)
-                        st.success("✅ Đã lưu template!")
-                    except Exception as e:
-                        st.error(f"Lỗi khi lưu template: {e}")
-
-            st.markdown("---")
-            st.subheader("🚀 Tạo & Tải Email")
-            
-            if 'df_processed' in st.session_state and up_function:
-                # Group Selection for Preview
-                df_proc_prev = st.session_state['df_processed']
-                all_groups_prev = sorted(df_proc_prev[COL_GROUP_FUNCTION].dropna().unique())
-                
-                selected_grp = st.selectbox("Chọn nhóm để xem trước:", all_groups_prev)
-                
-                if selected_grp:
-                    # Render Preview for Selected Group
-                    try:
-                        g_data = st.session_state['df_processed'][st.session_state['df_processed'][COL_GROUP_FUNCTION] == selected_grp]
+                    c_sum1, c_sum2 = st.columns(2)
+                    if not df_summary.empty:
+                        total_excel = df_summary['Số HĐ (Excel)'].sum()
+                        total_pdf = df_summary['PDF Tìm Thấy'].sum()
                         
-                        # 1. Lookup Email Info
-                        email_map_prev = get_email_mapping_from_upload(up_function)
+                        c_sum1.metric("Tổng HĐ trên Excel", f"{total_excel:,}")
+                        c_sum2.metric("Tổng PDF tìm thấy", f"{total_pdf:,}", delta=f"{total_pdf - total_excel}")
                         
-                        assoc_f = ""
-                        if COL_GROUP_FUNCTION in g_data.columns:
-                             v_funcs = g_data[COL_GROUP_FUNCTION].dropna()
-                             if not v_funcs.empty: assoc_f = v_funcs.iloc[0]
+                        st.dataframe(df_summary, use_container_width=True)
                         
-                        l_key = normalize_func_name(str(assoc_f))
-                        e_info = email_map_prev.get(l_key, {})
+                        import plotly.express as px
+                        df_melt = df_summary.melt(id_vars=[COL_GROUP_FUNCTION], value_vars=['Số HĐ (Excel)', 'PDF Tìm Thấy'], var_name='Loại', value_name='Số Lượng')
                         
-                        if not e_info.get('to'):
-                            l_key_d = normalize_func_name(str(selected_grp))
-                            e_info_d = email_map_prev.get(l_key_d, {})
-                            if e_info_d.get('to'): e_info = e_info_d
+                        fig = px.bar(
+                            df_melt, 
+                            x=COL_GROUP_FUNCTION, 
+                            y='Số Lượng', 
+                            color='Loại',
+                            barmode='group',
+                            title="So Sánh Số Lượng Hóa Đơn: Dữ Liệu Excel vs File PDF",
+                            text_auto=True,
+                            color_discrete_map={'Số HĐ (Excel)': '#00B14F', 'PDF Tìm Thấy': '#FF6B6B'}
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
                         
-                        e_to = e_info.get('to') or "user@example.com"
-                        e_cc = e_info.get('cc', "")
-                        r_name = extract_name_from_email(e_to)
-                        
-                        # 2. Stats
-                        inv_c = 0
-                        if COL_BOOKING_CODE in g_data.columns:
-                            inv_raw = g_data[COL_BOOKING_CODE].dropna().astype(str).str.strip()
-                            inv_c = inv_raw[inv_raw != ''].nunique()
-                        
-                        # 3. Date
-                        try:
-                            ds = pd.to_datetime(g_data[COL_TIME], errors='coerce')
-                            my = f"{int(ds.dt.month.max())}/{int(ds.dt.year.max())}"
-                        except: my = "MM/YYYY"
-                        
-                        # 4. Generate HTML
-                        preview_html = email_template_content
-                        rep_map = {
-                            'recipient_name': r_name,
-                            'sender_name': 'Duyên',
-                            'month_year': my,
-                            'invoice_count': inv_c,
-                            'vendor_code': 'VENDOR_CODE',
-                            'po_number': 'PO_NUMBER',
-                            'invoice_date': 'DD-MM-YYYY',
-                            'cc_list': e_cc
-                        }
-                        for k, v in rep_map.items():
-                            preview_html = preview_html.replace(f"{{{k}}}", str(v))
-                        
-                        st.caption(f"📧 Gửi đến: **{e_to}** | CC: {e_cc}")
-                        components.html(preview_html, height=500, scrolling=True)
-                        
-                    except Exception as e:
-                        st.error(f"Lỗi xem trước: {e}")
-                
-                # ACTION BUTTONS
-                # Generate All Logic
-                if st.button("⚡ Tạo Tất Cả Email (HTML)", type="primary", use_container_width=True):
-                    with st.spinner("Đang tạo..."):
-                        with tempfile.TemporaryDirectory() as temp_email_dir:
-                            email_map_gen = get_email_mapping_from_upload(up_function)
-                            
-                            cnt = 0
-                            for grp in all_groups_prev:
-                                try:
-                                    # Filter
-                                    g_df = df_proc_prev[df_proc_prev[COL_GROUP_FUNCTION] == grp]
-                                    
-                                    # Email Lookup
-                                    assoc_f = ""
-                                    if COL_GROUP_FUNCTION in g_df.columns:
-                                         v_funcs = g_df[COL_GROUP_FUNCTION].dropna()
-                                         if not v_funcs.empty: assoc_f = v_funcs.iloc[0]
-
-                                    l_key = normalize_func_name(str(assoc_f))
-                                    e_info = email_map_gen.get(l_key, {})
-                                    
-                                    # Fallback
-                                    if not e_info.get('to'):
-                                        l_key_d = normalize_func_name(str(grp))
-                                        e_info_d = email_map_gen.get(l_key_d, {})
-                                        if e_info_d.get('to'): e_info = e_info_d
-                                    
-                                    e_to = e_info.get('to') or "user@example.com"
-                                    e_cc = e_info.get('cc', "")
-                                    r_name = extract_name_from_email(e_to)
-                                    
-                                    # Stats
-                                    inv_c = 0
-                                    if COL_BOOKING_CODE in g_df.columns:
-                                        inv_raw = g_df[COL_BOOKING_CODE].dropna().astype(str).str.strip()
-                                        inv_c = inv_raw[inv_raw != ''].nunique()
-                                    
-                                    if inv_c == 0: continue
-                                    
-                                    # Date
-                                    try:
-                                        ds = pd.to_datetime(g_df[COL_TIME], errors='coerce')
-                                        my = f"{int(ds.dt.month.max())}/{int(ds.dt.year.max())}"
-                                    except: my = ""
-                                    
-                                    # Render
-                                    final_h = email_template_content
-                                    rep_map = {
-                                        'recipient_name': r_name,
-                                        'sender_name': 'Duyên',
-                                        'month_year': my,
-                                        'invoice_count': inv_c,
-                                        'vendor_code': '94001511',
-                                        'po_number': 'PO4502120145',
-                                        'invoice_date': '07-08-2023',
-                                        'cc_list': e_cc
-                                    }
-                                    for k, v in rep_map.items():
-                                        final_h = final_h.replace(f"{{{k}}}", str(v))
-                                        
-                                    # Save
-                                    safe_n = str(grp).replace('/', '_')
-                                    safe_e = e_to.replace('/', '_').replace('\\', '_')
-                                    out_name = f"email_{safe_n}_{safe_e}.html"
-                                    
-                                    with open(os.path.join(temp_email_dir, out_name), "w", encoding="utf-8") as f:
-                                        f.write(final_h)
-                                    cnt += 1
-                                except: pass
-                            
-                            # Zip result
-                            if cnt > 0:
-                                zip_buf = io.BytesIO()
-                                with zipfile.ZipFile(zip_buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-                                    for r, d, f in os.walk(temp_email_dir):
-                                        for file in f:
-                                            zf.write(os.path.join(r, file), file)
-                                zip_buf.seek(0)
-                                st.session_state['email_zip'] = zip_buf
-                                st.success(f"Đã tạo {cnt} file.")
-                            else:
-                                st.warning("Không tạo được file nào.")
-
-                if 'email_zip' in st.session_state:
-                    st.download_button(
-                        label="⬇️ Tải Xuống Tất Cả Email (Zip)",
-                        data=st.session_state['email_zip'],
-                        file_name="All_Emails_HTML.zip",
-                        mime="application/zip",
-                        use_container_width=True
-                    )
-            
-            # --- 3. SUMMARY & CHART (NEW SECTION) ---
-            st.markdown("---")
-            with st.expander("📊 Bảng Đối Chiếu Số Liệu & Trạng Thái PDF (Theo Group Function)", expanded=True):
-                if 'df_processed' in st.session_state:
-                    df_proc = st.session_state['df_processed']
-                    
-                    # Check if COL_GROUP_FUNCTION exists
-                    if COL_GROUP_FUNCTION not in df_proc.columns:
-                        st.error(f"Không tìm thấy cột '{COL_GROUP_FUNCTION}' trong dữ liệu. Vui lòng kiểm tra cấu hình.")
-                    else:
-                        all_funcs = sorted(df_proc[COL_GROUP_FUNCTION].dropna().unique())
-                        
-                        # Get PDF Directory (from session or default)
-                        pdf_src_dir = st.session_state.get('src_dir', "./00_master_data/PDF/")
-                        
-                        pdf_files = []
-                        if os.path.exists(pdf_src_dir):
-                            try:
-                                pdf_files = [f for f in os.listdir(pdf_src_dir) if f.lower().endswith('.pdf')]
-                            except: pass
-                        
-                        summary_data = []
-                        
-                        # Iterate Group Functions
-                        for func in all_funcs:
-                            # Filter by Group Function
-                            g_data = df_proc[df_proc[COL_GROUP_FUNCTION] == func]
-                            
-                            # Count from Data
-                            count_excel = 0
-                            inv_list = []
-                            if COL_BOOKING_CODE in g_data.columns:
-                                inv_list = g_data[COL_BOOKING_CODE].dropna().astype(str).str.strip().unique()
-                                inv_list = [i for i in inv_list if i != '']
-                                count_excel = len(inv_list)
-                            
-                            # Count matching PDFs
-                            count_pdf = 0
-                            missing_pdf_list = []
-                            
-                            if pdf_files:
-                                # Use Invoice Number for matching if available, else Booking Code
-                                match_col = COL_INVOICE_NUM if COL_INVOICE_NUM in g_data.columns else COL_BOOKING_CODE
-                                
-                                check_items = g_data[match_col].dropna().astype(str).str.strip().unique()
-                                check_items = [i for i in check_items if i != '']
-                                
-                                for item in check_items:
-                                    # Naive check: item in filename
-                                    if any(item in f for f in pdf_files):
-                                        count_pdf += 1
-                                    else:
-                                        missing_pdf_list.append(item)
-                            
-                            status = "✅ Đủ" if count_pdf >= count_excel and count_excel > 0 else ("⚠️ Thiếu" if count_pdf > 0 else "❌ Không tìm thấy")
-                            if not pdf_files: status = "⚪ Chưa có PDF"
-                            
-                            summary_data.append({
-                                COL_GROUP_FUNCTION: func,
-                                "Số HĐ (Excel)": count_excel,
-                                "PDF Tìm Thấy": count_pdf if pdf_files else 0,
-                                "Trạng Thái": status
-                            })
-                        
-                        df_summary = pd.DataFrame(summary_data)
-                        
-                        # Display metrics
-                        c_sum1, c_sum2 = st.columns(2)
-                        if not df_summary.empty:
-                            total_excel = df_summary['Số HĐ (Excel)'].sum()
-                            total_pdf = df_summary['PDF Tìm Thấy'].sum()
-                            
-                            c_sum1.metric("Tổng HĐ trên Excel", f"{total_excel:,}")
-                            c_sum2.metric("Tổng PDF tìm thấy", f"{total_pdf:,}", delta=f"{total_pdf - total_excel}")
-                            
-                            # Display Table
-                            st.dataframe(df_summary, use_container_width=True)
-                            
-                            # Chart
-                            import plotly.express as px
-                            # Melt for grouped bar chart
-                            df_melt = df_summary.melt(id_vars=[COL_GROUP_FUNCTION], value_vars=['Số HĐ (Excel)', 'PDF Tìm Thấy'], var_name='Loại', value_name='Số Lượng')
-                            
-                            fig = px.bar(
-                                df_melt, 
-                                x=COL_GROUP_FUNCTION, 
-                                y='Số Lượng', 
-                                color='Loại',
-                                barmode='group',
-                                title="So Sánh Số Lượng Hóa Đơn: Dữ Liệu Excel vs File PDF",
-                                text_auto=True,
-                                color_discrete_map={'Số HĐ (Excel)': '#00B14F', 'PDF Tìm Thấy': '#FF6B6B'} # Grab Green vs Red
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
-                            
-                            if not pdf_files:
-                                st.warning(f"Không tìm thấy file PDF nào trong thư mục: '{pdf_src_dir}'. Vui lòng kiểm tra lại đường dẫn ở Tab 'Phân Phối PDF'.")        
+                        if not pdf_files:
+                            st.warning(f"Không tìm thấy file PDF nào trong thư mục: '{pdf_src_dir}'. Vui lòng kiểm tra lại đường dẫn ở Tab 'Phân Phối PDF'.")        
 
 
 
