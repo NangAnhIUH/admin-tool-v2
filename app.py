@@ -492,6 +492,7 @@ def write_and_format_sheet_common(df, sheet_name, title_prefix, writer_obj, mont
     if COL_INVOICE_NUM in df.columns:
         col_idx = df.columns.get_loc(COL_INVOICE_NUM)
         col_char = xlsxwriter.utility.xl_col_to_name(col_idx)
+        worksheet.write(2, col_idx - 1, "SỐ LƯỢNG HÓA ĐƠN", red_fmt)
         worksheet.write_formula(2, col_idx, f"=SUBTOTAL(3, {col_char}5:{col_char}{last_row_excel})", red_fmt)
 
     # Signatures
@@ -561,6 +562,10 @@ def copy_intro_sheet(source_file_path, target_file_path):
         
         for col_dim in ws_source.column_dimensions.values():
             if col_dim.width: ws_target.column_dimensions[col_dim.index].width = col_dim.width
+
+        for col in ['A', 'B', 'C']:
+            ws_target.column_dimensions[col].width = 60
+            
         for merged in ws_source.merged_cells.ranges:
             ws_target.merge_cells(merged.coord)
             
@@ -909,6 +914,42 @@ def distribute_all_files_logic(df_processed, df_report, source_pdf_dir, target_r
     
     count_excel, count_email, count_pdf = 0, 0, 0
     
+    # --- Xử lý hóa đơn Discount (Booking Code trống) ---
+    if COL_BOOKING_CODE in df_processed.columns and COL_INVOICE_NUM in df_processed.columns:
+        # Rows where Booking Code is empty/NaN
+        mask_discount = df_processed[COL_BOOKING_CODE].isna() | (df_processed[COL_BOOKING_CODE].astype(str).str.strip() == '')
+        discount_invoices = df_processed.loc[mask_discount, COL_INVOICE_NUM].dropna().unique()
+        discount_invoices = [str(x).strip().replace('.0', '') for x in discount_invoices if x]
+        
+        if discount_invoices:
+            logs.append(f"ℹ️ Tìm thấy {len(discount_invoices)} hóa đơn Discount (không có Booking Code). Phân phối ra thư mục gốc.")
+            
+            for inv_num in discount_invoices:
+                matched = None
+                # Try simple matching first
+                patterns = [f"_{inv_num}_", f"{inv_num}_"]
+                for p in patterns:
+                    for f in available_pdfs:
+                        if p in f:
+                            matched = f; break
+                    if matched: break
+                
+                # Heuristic fallback
+                if not matched:
+                    for f in available_pdfs:
+                        if inv_num in f and len(inv_num) > 4:
+                            matched = f; break
+                
+                if matched:
+                    try:
+                        shutil.copy2(os.path.join(source_pdf_dir, matched), os.path.join(target_root_dir, matched))
+                        # Remove from available_pdfs to avoid processing it again if it matches a group
+                        if matched in available_pdfs:
+                             available_pdfs.remove(matched)
+                        count_pdf += 1
+                    except Exception as e:
+                        logs.append(f"❌ Lỗi copy PDF Discount {matched}: {e}")
+
     # Date info for Excel/Email
     try:
         dt_s = pd.to_datetime(df_processed[COL_TIME], errors='coerce')
