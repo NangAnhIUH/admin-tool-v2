@@ -17,6 +17,7 @@ from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 from email.mime.base import MIMEBase
 from email import encoders
+import traceback
 from streamlit_quill import st_quill
 
 # ==========================================
@@ -190,7 +191,8 @@ def create_eml_draft(output_root_dir):
                 break
 
         # 2. Tìm file Excel Bảng Kê (để đính kèm)
-        excel_file = next((f for f in files if f.endswith('.xlsx') and f.startswith('BK_GRAB_')), None)
+        # Update: file name might start with prefix (e.g. 001_BK_GRAB...), so we check if BK_GRAB_ is IN the name
+        excel_file = next((f for f in files if f.endswith('.xlsx') and 'BK_GRAB_' in f), None)
 
         if html_file and excel_file:
             try:
@@ -203,6 +205,8 @@ def create_eml_draft(output_root_dir):
                 
                 # Tạo đối tượng Email (Structure: Mixed -> [Alternative(Text, HTML), Attachments])
                 msg = MIMEMultipart('mixed')
+                msg['X-Unsent'] = '1' # Open as Draft/Unsent
+                msg['X-Auto-Response-Suppress'] = 'All'
                 msg['Subject'] = f"Bảng Kê Grab Tháng - Nhóm {group_name}"
                 if to_email: msg['To'] = to_email
                 
@@ -270,7 +274,9 @@ def create_eml_draft(output_root_dir):
                 logs.append(msg_log)
                 
             except Exception as e:
-                logs.append(f"❌ Lỗi nhóm {group_name}: {e}")
+                error_msg = f"❌ Lỗi tạo draft cho {group_name}. Lỗi: {e}. Traceback: {traceback.format_exc()}"
+                logs.append(error_msg)
+                st.error(error_msg) # Add Streamlit error for visibility
         else:
             pass
             
@@ -916,8 +922,9 @@ def distribute_all_files_logic(df_processed, df_report, source_pdf_dir, target_r
     for idx, func in enumerate(all_funcs, start=1):
         safe_func_name = str(func).strip().replace("/", "_").replace("\\", "_")
         prefix = f"{idx:03d}"
-        # Create Group Folder
-        group_dir = os.path.join(target_root_dir, safe_func_name)
+        # Create Group Folder (Numbered)
+        group_dir_name = f"{prefix}_{safe_func_name}"
+        group_dir = os.path.join(target_root_dir, group_dir_name)
         os.makedirs(group_dir, exist_ok=True)
         
         # --- A. GENERATE EXCEL ---
@@ -1074,7 +1081,7 @@ def distribute_all_files_logic(df_processed, df_report, source_pdf_dir, target_r
                         count_pdf += 1
             except: pass
 
-        progress_bar.progress((idx + 1) / total_steps)
+        progress_bar.progress(min((idx + 1) / total_steps, 1.0))
 
     # --- B. GENERATE MASTER EXCEL ---
     try:
@@ -1632,27 +1639,44 @@ else:
                             
                             final_zip_buffer.seek(0)
                             
-                            st.success("✅ Xử lý hoàn tất!")
+                            # Save to session state
+                            st.session_state['deployment_zip'] = final_zip_buffer.getvalue()
+                            st.session_state['deployment_logs'] = logs
                             
-                            # Show Logs
+                            st.success("✅ Xử lý hoàn tất! Vui lòng tải xuống bên dưới.")
+                            
+                            # Show Logs immediately
                             with st.expander("Chi tiết xử lý"):
                                 for log in logs:
                                     if "❌" in log: st.error(log)
                                     elif "⚠️" in log: st.warning(log)
                                     else: st.text(log)
 
-                            # Download Button
-                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            st.download_button(
-                                label="⬇️ Tải Xuống Kết Quả (Zip)",
-                                data=final_zip_buffer,
-                                file_name=f"KETQUA_PHAN_PHOI_{timestamp}.zip",
-                                mime="application/zip"
-                            )
-
                     except Exception as e:
                         st.error(f"❌ Có lỗi xảy ra: {e}")
                         st.exception(e)
+        
+        # Check if result exists in session state and show download button
+        if 'deployment_zip' in st.session_state:
+            st.write("---")
+            st.success("✅ Kết quả xử lý đã sẵn sàng!")
+            
+            # Show Logs (optional, if user wants to see again without rerun)
+            if 'deployment_logs' in st.session_state:
+                with st.expander("Xem lại chi tiết xử lý"):
+                    for log in st.session_state['deployment_logs']:
+                        if "❌" in log: st.error(log)
+                        elif "⚠️" in log: st.warning(log)
+                        else: st.text(log)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            st.download_button(
+                label="⬇️ Tải Xuống Kết Quả (Zip)",
+                data=st.session_state['deployment_zip'],
+                file_name=f"KETQUA_PHAN_PHOI_{timestamp}.zip",
+                mime="application/zip",
+                type="primary"
+            )
 
         elif 'df_processed' not in st.session_state:
             st.warning("⚠️ Vui lòng chạy 'Xử Lý Dữ Liệu' (Tab 2) trước.")

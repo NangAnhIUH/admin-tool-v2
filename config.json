@@ -8,7 +8,7 @@
         "SKIPROWS_GROUP_FUNCTION_APPROVAL": 1
     },
     "input_columns": {
-        "IN_COL_BK_BOOKING_ID": "booking_code_for_business_grab_1",
+        "IN_COL_BK_BOOKING_ID": "booking_code_for_business_grab_com",
         "IN_COL_BK_GROUP_NAME": "Tên nhóm (Group Name)",
         "IN_COL_BK_VERTICAL": "Dịch vụ (Vertical)",
         "IN_COL_BK_COMPANY_NAME": "Tên công ty (Company Name)",
@@ -148,5 +148,7 @@
             "theme": "light",
             "access_level": "read_only"
         }
-    }
+    },
+    "theme": "light",
+    "access_level": "full"
 }
